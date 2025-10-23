@@ -70,7 +70,7 @@ column_names = {
     "Tax amount" : 'tax_amount',
     "Confirmed Quantity" : 'confirmed_quantity',
     "Cancellation Date" : 'cancellation_date',
-    "Region" : 'region',
+    "Region" : 'state',
     "Batch" : 'batch'
 }
 frames = []
@@ -82,7 +82,7 @@ for file in files:
     print(f"Loaded {file} with {df.shape[0]:,} records")
 ecc_data = pd.concat(frames, ignore_index=True)
 ecc_data = ecc_data[['date', 'so', 'dist_channel', 'sales_doc_type', 'customer',
-                     'name', 'name_2', 'street', 'zip', 'city', 'country',
+                     'name', 'name_2', 'street', 'zip', 'city', 'state', 'country',
                      'reason_for_rejection', 'cancellation_reason', 'material',
                      'desc', 'material_type', 'net_value', 'tax_amount', 'confirmed_quantity', 
                      'batch']]
@@ -94,71 +94,69 @@ for col in num_cols:
     ecc_data[col] = pd.to_numeric(ecc_data[col], errors='coerce')
 text_cols = ['dist_channel', 'sales_doc_type', 'name', 'name_2', 
              'street', 'city', 'country', 'cancellation_reason',
-             'desc', 'material_type']
+             'desc', 'material_type', 'state']
 for col in text_cols:
     ecc_data[col] = ecc_data[col].astype(str).str.strip().str.upper()
 ecc_data['zip'] = ecc_data['zip'].astype(str).str.strip().str[:5] # ZIP codes: keep only first 5 digits
 ecc_data['zip'] = pd.to_numeric(ecc_data['zip'], errors='coerce')
 ecc_data['return_flag'] = np.where(ecc_data['sales_doc_type'] == 'ZREU', 1, 0)
-ecc_data.drop_duplicates(subset = ['so', 'return_flag', 'customer', 'material'], inplace=True) # Dedup
+ecc_data.drop_duplicates(subset = ['so', 'return_flag', 'customer', 'material'], 
+                         inplace=True) # Dedup
 
 # Clean Return Data
 returns = ecc_data[ecc_data['return_flag'] == 1].copy()
 returns = returns[returns['reason_for_rejection'].isna()] # Exclude Canceled Returns (Stan Confirmed this)
 returns.drop_duplicates(subset=['customer', 'material'], inplace=True) # Customers can create multiple return orders for same material...
+returns['confirmed_quantity'] = -1 * returns['confirmed_quantity']
+returns['net_value'] = -1 * returns['net_value']
 
 # Sales Data
 sales = ecc_data[ecc_data['return_flag'] == 0].copy()
 sales = sales[sales['reason_for_rejection'].isna()] # Exclude Canceled Sales Orders
 
 ecc_data = pd.concat([sales, returns], ignore_index=True)
+ecc_data['erp'] = 'ECC'
+print(f"Processed ECC data with {ecc_data.shape[0]:,} records after cleaning")
+
+# FILTER OUT DIST CHANNEL != WEBSHOP?????
+
+
+
+
+
+
+
 
 
 ############################################################################################################################
 # Get BYD Data and ECC Data into Common Format to Concatenate
     # BYD is more restricted, so we will match BYD format
+data.drop(columns=['address', 'oldmatno'], inplace=True)
+data.rename(columns={
+    'ship-to': 'cx_name',
+    'so': 'so_num',
+    'desc1' : 'desc',
+    'pid1' : 'mat_id'}, inplace=True)
+ecc_data.rename(columns={
+    'so' : 'so_num',
+    'customer' : 'cx_num',
+    'name' : 'cx_name',
+    'material' : 'mat_id',
+    'net_value' : 'val',
+    'confirmed_quantity' : 'qty'}, inplace=True)
+ecc_data.drop(columns=['dist_channel', 'sales_doc_type', 'name_2', 'city',
+                       'country', 'reason_for_rejection', 'cancellation_reason', 
+                       'material_type', 'batch', 'tax_amount', 'street'], inplace=True)
+ecc_data['kmat'] = np.nan
+col_order = ['date', 'so_num', 'cx_num', 'cx_name', 'zip', 'state', 'mat_id',
+             'kmat', 'desc', 'val', 'qty', 'return_flag', 'erp']
+ecc_data = ecc_data[col_order]
+data = data[col_order]
+# CONCAT
+final_data = pd.concat([data, ecc_data], ignore_index=True)
 
+print(f"Final concatenated data has {final_data.shape[0]:,} records")
 
-# Save File
-
-
-
-
-
-
-
-############################################################################################################################
-# This can be done in a seperate file after concatenation
-# That way we only have to do this process once, not every time we run. 
-# When we update data, we will just stack it onto the cleaned set of data and deuplicate again.
-# Filtering Out Returns by Matching Returns to the Most Recent Sales (This should be done at the end)
-sales = data[data["qty"] > 0].copy()
-returns = data[data["qty"] < 0].copy()
-
-def match_sales_and_returns(sales_df, returns_df):
-    '''We match the most recent sale for each return'''
-    sales_df.sort_values(["cx_num", "pid1", "date"], inplace=True, ascending=[True, True, True])
-    returns_df.sort_values(["cx_num", "pid1", "date"], inplace=True, ascending=[True, True, False])
-    
-    returned_rows = []
-    used_rows = set()
-    for i, r in returns_df.iterrows():
-        return_qty = r['qty']
-        prior_sales = sales_df[(sales_df['date'] < r['date']) &
-                               (sales_df['cx_num'] == r['cx_num']) &
-                               (sales_df['pid1'] == r['pid1']) &
-                               (~sales_df.index.isin(used_rows))
-                               ]
-        if len(prior_sales) > 0:
-            last_idx = prior_sales.index[-1]
-            returned_rows.append(last_idx)  # most recent sale
-            used_rows.add(last_idx)
-        else:
-            continue
-    return returned_rows
-
-
-returned_indices = match_sales_and_returns(sales, returns)
-
-sales['returned'] = sales.index.isin(returned_indices)
-kept_sales = sales[~sales['returned']].copy()
+# Export as CSV
+final_data.to_csv(r"DATA\cleaned_data\cleaned_data.csv", index=False)
+print("Exported cleaned data to DATA/cleaned_data/cleaned_data.csv")
