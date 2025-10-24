@@ -4,8 +4,39 @@
 import pandas as pd
 import numpy as np
 import os
+from datetime import datetime, timedelta
 
-# Load Cleaned Data
+#INPUTS
+PATH = r"DATA\cleaned_data\mapped_net_sales_data.csv"
+
+data = pd.read_csv(PATH)
+data['date'] = pd.to_datetime(data['date'], format='%Y-%m-%d', errors='coerce')
+data['mat_id'] = pd.to_numeric(data['mat_id'], errors='coerce')
+data['kmat'] = pd.to_numeric(data['kmat'], errors='coerce')
+
+for i, c in enumerate(data['cx_num'].unique()):
+    print(f'Iteration {i+1}: Customer {c}')
+    subset = data[data['cx_num'] == c].sort_values(by='date')
+    min_date = subset['date'].min()
+    max_date = subset['date'].max()
+    ecc_start = datetime(2023, 12, 31)
+    if min_date < ecc_start and max_date > ecc_start:
+        break
+
+# This confirms that BYD CX NUMS carry over to ECC!!!!!!!!!!!!!!!!!!
+subset
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # OUTLINE:
